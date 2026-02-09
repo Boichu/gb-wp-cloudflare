@@ -73,9 +73,93 @@ function gb_cf_settings_page() {
             </table>
             <?php submit_button('Enregistrer', 'primary', 'gb_cf_save_settings'); ?>
         </form>
+
+        <hr>
+        <h2>Tester la connexion</h2>
+        <p>
+            <button type="button" id="gb_cf_test_connection" class="button button-secondary">Tester la connexion API</button>
+            <span id="gb_cf_test_result" style="margin-left: 10px;"></span>
+        </p>
+
+        <script>
+        document.getElementById('gb_cf_test_connection').addEventListener('click', function() {
+            var btn = this;
+            var result = document.getElementById('gb_cf_test_result');
+            btn.disabled = true;
+            result.innerHTML = 'Test en cours...';
+            result.style.color = '#666';
+
+            fetch(ajaxurl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'action=gb_cf_test_connection&nonce=<?= wp_create_nonce('gb_cf_test_connection') ?>'
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                if (data.success) {
+                    result.innerHTML = '✅ ' + data.data.message;
+                    result.style.color = 'green';
+                } else {
+                    result.innerHTML = '❌ ' + data.data.message;
+                    result.style.color = 'red';
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                result.innerHTML = '❌ Erreur: ' + error;
+                result.style.color = 'red';
+            });
+        });
+        </script>
     </div>
     <?php
 }
+
+/**
+ * AJAX handler pour tester la connexion API Cloudflare
+ */
+add_action('wp_ajax_gb_cf_test_connection', function() {
+    check_ajax_referer('gb_cf_test_connection', 'nonce');
+
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Permission refusée']);
+    }
+
+    $zone_id = get_option('gb_cf_zone_id', '');
+    $api_token = get_option('gb_cf_api_token', '');
+
+    if (empty($zone_id) || empty($api_token)) {
+        wp_send_json_error(['message' => 'Zone ID ou API Token manquant']);
+    }
+
+    // Test avec l'endpoint "verify token"
+    $response = wp_remote_get('https://api.cloudflare.com/client/v4/user/tokens/verify', [
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_token,
+            'Content-Type'  => 'application/json',
+        ],
+        'timeout' => 15,
+    ]);
+
+    if (is_wp_error($response)) {
+        wp_send_json_error(['message' => 'Erreur HTTP: ' . $response->get_error_message()]);
+    }
+
+    $body = json_decode(wp_remote_retrieve_body($response), true);
+
+    if (!empty($body['success']) && $body['success'] === true) {
+        $status = $body['result']['status'] ?? 'unknown';
+        if ($status === 'active') {
+            wp_send_json_success(['message' => 'Connexion réussie ! Token actif.']);
+        } else {
+            wp_send_json_error(['message' => 'Token trouvé mais statut: ' . $status]);
+        }
+    } else {
+        $error_msg = $body['errors'][0]['message'] ?? 'Erreur inconnue';
+        wp_send_json_error(['message' => 'Erreur API: ' . $error_msg]);
+    }
+});
 
 /**
  * Fonction générique de purge Cloudflare
