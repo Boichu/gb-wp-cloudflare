@@ -247,7 +247,7 @@ add_action('save_post', function($post_ID, $post, $update) {
 }, 20, 3);
 
 /**
- * Ajout d’un menu admin avec bouton “Purger le cache CF”
+ * Ajout d'un menu admin avec lien direct de purge
  */
 add_action('admin_menu', function() {
     add_menu_page(
@@ -259,6 +259,54 @@ add_action('admin_menu', function() {
         'dashicons-cloud',
         75
     );
+});
+
+/**
+ * Intercepter le clic sur le menu pour purger directement
+ */
+add_action('admin_init', function() {
+    if (!isset($_GET['page']) || $_GET['page'] !== 'gb-cf-purge') {
+        return;
+    }
+
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    // Vérifier si les paramètres sont configurés
+    $zone_id = get_option('gb_cf_zone_id', '');
+    $api_token = get_option('gb_cf_api_token', '');
+
+    if (empty($zone_id) || empty($api_token)) {
+        // Rediriger vers la page de configuration
+        wp_redirect(admin_url('options-general.php?page=gb-cf-settings&notice=config_missing'));
+        exit;
+    }
+
+    // Purger le cache directement
+    $ok = gb_cf_perform_purge(['purge_everything' => true]);
+
+    // Rediriger vers la page d'origine avec un message
+    $redirect = wp_get_referer() ?: admin_url();
+    $redirect = add_query_arg('gb_cf_purged', $ok ? 'success' : 'error', $redirect);
+    wp_redirect($redirect);
+    exit;
+});
+
+/**
+ * Afficher les notices après la purge
+ */
+add_action('admin_notices', function() {
+    if (isset($_GET['gb_cf_purged'])) {
+        if ($_GET['gb_cf_purged'] === 'success') {
+            echo '<div class="notice notice-success is-dismissible"><p>Cache Cloudflare purgé avec succès ✅</p></div>';
+        } else {
+            echo '<div class="notice notice-error is-dismissible"><p>Erreur lors de la purge du cache Cloudflare ❌</p></div>';
+        }
+    }
+    if (isset($_GET['notice']) && $_GET['notice'] === 'config_missing') {
+        echo '<div class="notice notice-warning is-dismissible"><p>Veuillez configurer Zone ID et API Token avant de purger le cache.</p></div>';
+    }
 });
 
 add_action('admin_bar_menu', function($wp_admin_bar) {
