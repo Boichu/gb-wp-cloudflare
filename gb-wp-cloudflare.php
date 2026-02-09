@@ -133,7 +133,7 @@ add_action('wp_ajax_gb_cf_test_connection', function() {
         wp_send_json_error(['message' => 'Zone ID ou API Token manquant']);
     }
 
-    // Test avec l'endpoint "verify token"
+    // 1. Test du token
     $response = wp_remote_get('https://api.cloudflare.com/client/v4/user/tokens/verify', [
         'headers' => [
             'Authorization' => 'Bearer ' . $api_token,
@@ -148,17 +148,38 @@ add_action('wp_ajax_gb_cf_test_connection', function() {
 
     $body = json_decode(wp_remote_retrieve_body($response), true);
 
-    if (!empty($body['success']) && $body['success'] === true) {
-        $status = $body['result']['status'] ?? 'unknown';
-        if ($status === 'active') {
-            wp_send_json_success(['message' => 'Connexion réussie ! Token actif.']);
-        } else {
-            wp_send_json_error(['message' => 'Token trouvé mais statut: ' . $status]);
-        }
-    } else {
+    if (empty($body['success']) || $body['success'] !== true) {
         $error_msg = $body['errors'][0]['message'] ?? 'Erreur inconnue';
-        wp_send_json_error(['message' => 'Erreur API: ' . $error_msg]);
+        wp_send_json_error(['message' => 'Token invalide: ' . $error_msg]);
     }
+
+    $status = $body['result']['status'] ?? 'unknown';
+    if ($status !== 'active') {
+        wp_send_json_error(['message' => 'Token trouvé mais statut: ' . $status]);
+    }
+
+    // 2. Test du Zone ID
+    $zone_response = wp_remote_get('https://api.cloudflare.com/client/v4/zones/' . $zone_id, [
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_token,
+            'Content-Type'  => 'application/json',
+        ],
+        'timeout' => 15,
+    ]);
+
+    if (is_wp_error($zone_response)) {
+        wp_send_json_error(['message' => 'Token OK, mais erreur HTTP sur Zone: ' . $zone_response->get_error_message()]);
+    }
+
+    $zone_body = json_decode(wp_remote_retrieve_body($zone_response), true);
+
+    if (empty($zone_body['success']) || $zone_body['success'] !== true) {
+        $error_msg = $zone_body['errors'][0]['message'] ?? 'Zone ID invalide ou non autorisé';
+        wp_send_json_error(['message' => 'Token OK, mais Zone ID invalide: ' . $error_msg]);
+    }
+
+    $zone_name = $zone_body['result']['name'] ?? 'inconnu';
+    wp_send_json_success(['message' => 'Connexion réussie ! Zone: ' . $zone_name]);
 });
 
 /**
